@@ -1,11 +1,11 @@
 #!/bin/bash
 #########################################################
-# Run hello bench for OCI nydus image.  #
-# Platform :All Linux Based Platform                    #
+# Run hello bench for OCI nydus overlaybd image.  #
+# Platform :Key Laboratory of Information Storage System，Ministry of Education                    #
 # Version  :1.0                                         #
-# Date     :2022-11-09                                  #
-# Author   :Bin Tang                                    #
-# Contact  :tangbin.bin@bytedance.com                   #
+# Date     :2024-01-15                                  #
+# Author   :Yang Xiao                                    #
+# Contact  :menguozi@hust.edu.cn                   #
 #########################################################
 
 #########################################################
@@ -16,6 +16,7 @@ RESULT_FILE=result.txt
 RESULT_CSV=result.csv
 NYDUSIFY_BIN=$(which nydusify)
 NYDUS_IMAGE_BIN=$(which nydus-image)
+CONVERTOR=$(which convertor)
 
 #########################################################
 # Could alert value via arguments
@@ -48,7 +49,7 @@ function push_registry() {
 }
 
 #########################################################
-# Convert OCI image to nydus/stargz image and push to
+# Convert OCI image to nydus/stargz/overlaybd image and push to
 # TARGET_REGISTRY
 # Globals:
 #   TARGET_REGISTRY
@@ -62,7 +63,8 @@ function convert() {
 
     image=$1
 
-    sudo nerdctl pull ${TARGET_REGISTRY}/${image}
+    sudo nerdctl --insecure-registry pull ${TARGET_REGISTRY}/${image}
+
     echo "[INFO] Converting ${TARGET_REGISTRY}/${image} to ${TARGET_REGISTRY}/${image}:nydusv6 ..."
     echo "sudo $NYDUSIFY_BIN convert \
         --fs-version 6 \
@@ -74,6 +76,20 @@ function convert() {
         --nydus-image $NYDUS_IMAGE_BIN \
         --source ${TARGET_REGISTRY}/${image} \
         --target ${TARGET_REGISTRY}/${image}:nydusv6
+
+    echo "[INFO] Converting ${TARGET_REGISTRY}/${image} to ${TARGET_REGISTRY}/${image}:latest_obd ..."
+    echo "sudo $CONVERTOR \
+        --plain \
+        --insecure \
+        -r ${TARGET_REGISTRY}/${image} \
+        -i latest \
+        -o latest_obd"
+    sudo $CONVERTOR \
+        --plain \
+        --insecure \
+        -r ${TARGET_REGISTRY}/${image} \
+        -i latest \
+        -o latest_obd
 }
 
 #########################################################
@@ -101,7 +117,7 @@ function stop_all_containers {
 }
 
 #########################################################
-# Run hello bench for OCI image, nydus image
+# Run hello bench for OCI image, nydus image, overlaybd image
 # Globals:
 #   TARGET_REGISTRY
 # Arguments:
@@ -117,18 +133,19 @@ function run() {
     sudo nerdctl container prune -f
     sudo nerdctl image prune -f --all
     sudo systemctl restart nydus-snapshotter
+    sudo systemctl restart overlaybd-snapshotter
     sleep 1
 
     echo "[INFO] Run hello bench in ${image} ..."
-    sudo nerdctl --snapshotter overlayfs rmi -f ${TARGET_REGISTRY}/${image} >/dev/null 2>&1
-    result=$(sudo ./hello.py --engine nerdctl --snapshotter overlayfs --op run \
+    sudo nerdctl --insecure-registry --snapshotter overlayfs rmi -f ${TARGET_REGISTRY}/${image} >/dev/null 2>&1
+    result=$(sudo ./hello.py --engine nerdctl --insecure-registry --snapshotter overlayfs --op run \
         --registry=${TARGET_REGISTRY} \
         --images ${image} |
         grep "repo")
     echo ${result}
     echo ${result} >>${RESULT_DIR}/${RESULT_FILE}.${CURRENT_ROUND}
     echo "[INFO] Remove image ${TARGET_REGISTRY}/${image} ..."
-    sudo nerdctl --snapshotter overlayfs rmi -f ${TARGET_REGISTRY}/${image} >/dev/null 2>&1
+    sudo nerdctl --insecure-registry --snapshotter overlayfs rmi -f ${TARGET_REGISTRY}/${image} >/dev/null 2>&1
 
     echo "[INFO] Run hello bench in ${image}:nydusv6 ..."
     sudo nerdctl --snapshotter nydus rmi -f ${TARGET_REGISTRY}/${image}:nydusv6 >/dev/null 2>&1
@@ -140,6 +157,17 @@ function run() {
     echo ${result} >>${RESULT_DIR}/${RESULT_FILE}.${CURRENT_ROUND}
     echo "[INFO] Remove image ${TARGET_REGISTRY}/${image}:nydusv6 ..."
     sudo nerdctl --snapshotter nydus rmi -f ${TARGET_REGISTRY}/${image}:nydusv6 >/dev/null 2>&1
+
+    echo "[INFO] Run hello bench in ${image}:latest_obd ..."
+    sudo nerdctl --insecure-registry --snapshotter overlaybd rmi -f ${TARGET_REGISTRY}/${image}:latest_obd >/dev/null 2>&1
+    result=$(sudo ./hello.py --engine nerdctl --insecure-registry --snapshotter overlaybd --op run \
+        --registry=${TARGET_REGISTRY} \
+        --images ${image}:latest_obd |
+        grep "repo")
+    echo ${result}
+    echo ${result} >>${RESULT_DIR}/${RESULT_FILE}.${CURRENT_ROUND}
+    echo "[INFO] Remove image ${TARGET_REGISTRY}/${image}:latest_obd ..."
+    sudo nerdctl --insecure-registry --snapshotter overlaybd rmi -f ${TARGET_REGISTRY}/${image}:latest_obd >/dev/null 2>&1
 }
 
 #########################################################
@@ -190,6 +218,7 @@ function check_opts() {
 # Globals:
 #   NYDUSIFY_BIN
 #   NYDUS_IMAGE_BIN
+#   CONVERTOR
 # Arguments:
 #   None
 # Returns:
@@ -202,6 +231,11 @@ function check_binary() {
     fi
     if [ "${NYDUS_IMAGE_BIN}" == "" ]; then
         echo "[ERROR] nydus-image is not found in \$PATH"
+        exit
+    fi
+    
+    if [ "${CONVERTOR}" == "" ]; then
+        echo "[ERROR] convertor is not found in \$PATH"
         exit
     fi
 }

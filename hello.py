@@ -826,7 +826,7 @@ def main():
         "--snapshotter",
         type=str,
         help="only applied with containerd",
-        choices=["overlayfs", "nydus", "stargz"],
+        choices=["overlayfs", "nydus", "stargz", "overlaybd"],
         default="overlayfs",
     )
 
